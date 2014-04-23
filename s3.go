@@ -20,30 +20,7 @@ type S3 struct {
 	SecretKey string
 }
 
-func (s3 *S3) SignedURL(path string, expires time.Time) string {
-	if len(path) > 0 && path[0] != '/' {
-		path = "/" + path
-	}
-	u := url.URL{
-		Scheme: s3.Scheme,
-		Host:   s3.Host,
-		Path:   "/" + s3.Bucket + path,
-	}
-	if len(u.Scheme) == 0 {
-		u.Scheme = "https"
-	}
-	if len(u.Host) == 0 {
-		u.Host = "s3.amazonaws.com"
-	}
-	q := url.Values{}
-	q.Set("AWSAccessKeyId", s3.AccessKey)
-	q.Set("Expires", strconv.FormatInt(expires.Unix(), 10))
-	q.Set("Signature", s3.sign(s3.payload("GET", u.Path, nil, nil, expires)))
-	u.RawQuery = q.Encode()
-	return u.String()
-}
-
-func (s3 *S3) SignedUploadURL(path, contentType string, expires time.Time) string {
+func (s3 *S3) SignedURL(method, path, contentType string, expires time.Time) string {
 	if len(path) > 0 && path[0] != '/' {
 		path = "/" + path
 	}
@@ -59,11 +36,13 @@ func (s3 *S3) SignedUploadURL(path, contentType string, expires time.Time) strin
 		u.Host = "s3.amazonaws.com"
 	}
 	h := http.Header{}
-	h.Set("Content-Type", contentType)
+	if len(contentType) > 0 {
+		h.Set("Content-Type", contentType)
+	}
 	q := url.Values{}
 	q.Set("AWSAccessKeyId", s3.AccessKey)
 	q.Set("Expires", strconv.FormatInt(expires.Unix(), 10))
-	q.Set("Signature", s3.sign(s3.payload("PUT", u.Path, nil, h, expires)))
+	q.Set("Signature", s3.sign(s3.payload(method, u.Path, nil, h, expires)))
 	u.RawQuery = q.Encode()
 	return u.String()
 }
