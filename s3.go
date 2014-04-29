@@ -4,6 +4,9 @@ import (
 	"crypto/hmac"
 	"crypto/sha1"
 	"encoding/base64"
+	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"sort"
@@ -22,12 +25,14 @@ type S3 struct {
 
 func (s3 *S3) SignedURL(method, path, contentType string, expires time.Time) string {
 	if len(path) > 0 && path[0] != '/' {
-		path = "/" + path
+		path = "/" + s3.Bucket + "/" + path
+	} else {
+		path = "/" + s3.Bucket + path
 	}
 	u := url.URL{
 		Scheme: s3.Scheme,
 		Host:   s3.Host,
-		Path:   "/" + s3.Bucket + path,
+		Path:   path,
 	}
 	if len(u.Scheme) == 0 {
 		u.Scheme = "https"
@@ -40,11 +45,42 @@ func (s3 *S3) SignedURL(method, path, contentType string, expires time.Time) str
 		h.Set("Content-Type", contentType)
 	}
 	q := url.Values{}
+	sig := s3.sign(s3.payload(method, u.Path, nil, h, expires))
 	q.Set("AWSAccessKeyId", s3.AccessKey)
 	q.Set("Expires", strconv.FormatInt(expires.Unix(), 10))
-	q.Set("Signature", s3.sign(s3.payload(method, u.Path, nil, h, expires)))
+	q.Set("Signature", sig)
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+func (s3 *S3) NewRequest(method, path string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequest(method, path, body)
+	if err != nil {
+		return nil, err
+	}
+	u := req.URL
+	if len(u.Scheme) > 0 || len(u.Host) > 0 {
+		return nil, errors.New("path must not include scheme or host")
+	}
+	if len(s3.Scheme) > 0 {
+		u.Scheme = s3.Scheme
+	} else {
+		u.Scheme = "https"
+	}
+	if len(s3.Host) > 0 {
+		u.Host = s3.Host
+	} else {
+		u.Host = "s3.amazonaws.com"
+	}
+	if len(u.Path) > 0 && u.Path[0] != '/' {
+		u.Path = "/" + s3.Bucket + "/" + u.Path
+	} else {
+		u.Path = "/" + s3.Bucket + u.Path
+	}
+	req.Header.Set("Date", time.Now().Format(time.RFC1123))
+	sig := s3.sign(s3.payload(method, u.Path, req.URL.Query(), req.Header, time.Time{}))
+	req.Header.Set("Authorization", fmt.Sprintf("AWS %s:%s", s3.AccessKey, sig))
+	return req, nil
 }
 
 var querySign = [...]string{
